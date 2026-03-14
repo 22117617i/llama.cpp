@@ -1,0 +1,80 @@
+name: Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: 'Architecture'
+        required: true
+        default: 'arm64-v8a'
+        type: choice
+        options:
+          - arm64-v8a
+          - armeabi-v7a
+          - x86_64
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        run: |
+          mkdir -p $HOME/android-sdk
+          cd $HOME/android-sdk
+          wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          unzip -q commandlinetools-linux-11076708_latest.zip
+          mkdir -p cmdline-tools/latest
+          mv cmdline-tools/* cmdline-tools/latest/ 2>/dev/null || true
+          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          export PATH="$HOME/android-sdk/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses > /dev/null 2>&1 || true
+          sdkmanager "ndk;25.2.9519653" > /dev/null 2>&1
+          echo "ANDROID_NDK=$HOME/android-sdk/ndk/25.2.9519653" >> $GITHUB_ENV
+
+      - name: Build for Android
+        run: |
+          mkdir -p build
+          cd build
+          cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+                -DANDROID_ABI=${{ inputs.architecture }} \
+                -DANDROID_PLATFORM=android-26 \
+                -DGGML_METAL=OFF \
+                -DGGML_OPENMP=OFF \
+                -DLLAMA_BUILD_EXAMPLES=OFF \
+                -DLLAMA_BUILD_TESTS=OFF \
+                -DLLAMA_BUILD_SERVER=OFF \
+                ..
+          make -j4
+
+      - name: Find built libraries
+        run: |
+          echo "=== Searching for built libraries ==="
+          find . -name "*.a" -o -name "*.so" | sort
+          mkdir -p artifacts
+          cp $(find . -name "libllama.a" -o -name "libllama.so" | head -1) artifacts/ 2>/dev/null || true
+          cp $(find . -name "*.a" -o -name "*.so" | head -10) artifacts/ 2>/dev/null || true
+          echo "=== Files in artifacts/ ==="
+          ls -la artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-android-${{ inputs.architecture }}
+          path: |
+            artifacts/
+            build/libllama.a
+            build/libllama.so
+            build/*.a
+            build/*.so
+            build/**/*.a
+            build/**/*.so
+          if-no-files-found: warn
