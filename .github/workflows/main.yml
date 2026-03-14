@@ -1,0 +1,49 @@
+name: Android Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      architecture:
+        description: 'Architecture'
+        required: true
+        default: 'arm64-v8a'
+        type: choice
+        options:
+          - arm64-v8a
+          - armeabi-v7a
+          - x86_64
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Setup NDK
+        run: |
+          echo "y" | sudo ${ANDROID_HOME}/tools/bin/sdkmanager --install "ndk;25.2.9519653"
+          echo "ANDROID_NDK=${ANDROID_HOME}/ndk/25.2.9519653" >> $GITHUB_ENV
+      
+      - name: Build for Android
+        run: |
+          mkdir build
+          cd build
+          cmake -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+                -DANDROID_ABI=${{ inputs.architecture }} \
+                -DANDROID_PLATFORM=android-26 \
+                -DGGML_METAL=OFF \
+                -DGGML_OPENMP=OFF \
+                -DLLAMA_BUILD_EXAMPLES=OFF \
+                -DLLAMA_BUILD_TESTS=OFF \
+                -DLLAMA_BUILD_SERVER=OFF \
+                ..
+          make -j4
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: llama-android-${{ inputs.architecture }}
+          path: |
+            build/libllama.a
+            build/libllama.so
